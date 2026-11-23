@@ -220,7 +220,9 @@
         // Persisting events underneath /charger would erase them.
         const HISTORY_PATH = '/charging_history';
         let savedStopHistory = [];
-        let historyRef = null;
+        // Create this reference before any live charging listener can report a stop.
+        // This avoids dropping an event if live /charger data arrives first.
+        let historyRef = db ? db.ref(HISTORY_PATH) : null;
         let historyListenerReady = false;
         let lastObservedStopSignature = null;
 
@@ -231,8 +233,9 @@
         window.addEventListener('load', () => {
             initializeCharts();
             initializeDefaults();
-            subscribeToFirebase();
+            // History must be set up before /charger callbacks can detect a stop.
             subscribeToSavedHistory();
+            subscribeToFirebase();
             updateConnection(false); // Start as disconnected
             setInterval(updateChargingTime, 1000);
         });
@@ -540,7 +543,7 @@
                 setHistoryStatus('Firebase is unavailable. Saved history cannot be loaded.', true);
                 return;
             }
-            historyRef = db.ref(HISTORY_PATH);
+            if (!historyRef) historyRef = db.ref(HISTORY_PATH);
             // RTDB push keys are chronological. Display the latest 200 events.
             historyRef.limitToLast(200).on('value', snapshot => {
                 const records = snapshot.val() || {};
@@ -564,8 +567,11 @@
         }
 
         function saveStopEvent(data) {
+            // Defensive fallback: saving a stop does not depend on the history
+            // list finishing its initial read from Firebase.
+            if (!historyRef && db) historyRef = db.ref(HISTORY_PATH);
             if (!historyRef) {
-                setHistoryStatus('Stop observed, but Firebase history is not initialized.', true);
+                setHistoryStatus('Stop detected but Firebase is unavailable; history was not saved.', true);
                 return;
             }
             const reason = String(data.status || 'Unknown stopping condition');
