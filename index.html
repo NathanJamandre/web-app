@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Charger Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="connection-status disconnected" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span id="connectionText">Disconnected</span>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>⚡ Smart Charger Dashboard</h1>
+            <p>Real-time monitoring and analytics</p>
+        </header>
+
+        <div class="warning hidden" id="warningBox">
+            <strong>⚠️ Note:</strong> Make sure the charger device is connected to WiFi and sending data to Firebase.
+        </div>
+
+        <div id="mainContent">
+            <div class="tabs">
+                <button class="tab-button active" onclick="switchTab('realtime')">📊 Real-Time</button>
+                <button class="tab-button" onclick="switchTab('analytics')">📈 Analytics</button>
+                <button class="tab-button" onclick="switchTab('history')">📋 History</button>
+            </div>
+
+            <!-- Real-Time Tab -->
+            <div id="realtime" class="tab-content active">
+                <div class="grid">
+                    <!-- Voltage Card -->
+                    <div class="card">
+                        <h3>Voltage</h3>
+                        <div class="metric">
+                            <span class="metric-value" id="voltageValue">0.00</span>
+                            <span class="metric-unit">V</span>
+                        </div>
+                        <div class="text-small text-muted" id="voltageStatus">Waiting for data...</div>
+                    </div>
+
+                    <!-- Current Card -->
+                    <div class="card">
+                        <h3>Current</h3>
+                        <div class="metric">
+                            <span class="metric-value" id="currentValue">0.00</span>
+                            <span class="metric-unit">A</span>
+                        </div>
+                        <div class="text-xsmall text-muted">
+                            Raw: <span id="rawCurrentValue">0.000</span>A | Median: <span id="medianCurrentValue">0.000</span>A
+                        </div>
+                    </div>
+
+                    <!-- SOC Card -->
+                    <div class="card">
+                        <h3>Battery Charge Level</h3>
+                        <div class="metric">
+                            <span class="metric-value" id="socValue">0</span>
+                            <span class="metric-unit">%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="socProgress" style="width: 0%;"></div>
+                        </div>
+                        <div class="text-xsmall text-muted mt-10">
+                            Method: <span id="socMethod">-</span>
+                        </div>
+                    </div>
+
+                    <!-- State Card -->
+                    <div class="card">
+                        <h3>Charger State</h3>
+                        <span class="status-badge" id="stateValue">IDLE</span>
+                        <div class="text-small text-muted mt-10">
+                            Status: <span id="statusValue">Ready</span>
+                        </div>
+                    </div>
+
+                    <!-- Baseline Card -->
+                    <div class="card">
+                        <h3>Baseline Current</h3>
+                        <div class="metric">
+                            <span class="metric-value" id="baselineValue">0.000</span>
+                            <span class="metric-unit">A</span>
+                        </div>
+                        <div class="text-xsmall text-muted">
+                            Trust: <span id="trustValue">LOW_CONFIDENCE</span>
+                        </div>
+                    </div>
+
+                    <!-- Cutoff Card -->
+                    <div class="card">
+                        <h3>Taper Cutoff</h3>
+                        <div class="metric">
+                            <span class="metric-value" id="cutoffValue">0.000</span>
+                            <span class="metric-unit">A</span>
+                        </div>
+                        <div class="text-xsmall text-muted">
+                            Hysteresis: <span id="hysteresisValue">0.000</span>A
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Relay Status</div>
+                        <div class="info-value" id="relayStatus">OFF</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Time Charging</div>
+                        <div class="info-value" id="chargingTime">00:00:00</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Below Cutoff</div>
+                        <div class="info-value" id="belowCutoffTime">0 / 300 sec</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Session Mode</div>
+                        <div class="info-value" id="sessionMode">UNIVERSAL</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="analytics" class="tab-content">
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <h3>Charging Cycle Timeline</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="cycleChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Current & Voltage Over Time</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="powerChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>SOC Progress</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="socChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Charging Sessions</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="sessionsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Persistent History Tab -->
+            <div id="history" class="tab-content">
+                <div class="chart-card">
+                    <div class="history-heading">
+                        <div>
+                            <h3>Firebase Charging Stop History</h3>
+                            <p class="text-small text-muted">Completed stop events are saved in /charging_history and remain after page refresh.</p>
+                        </div>
+                        <button id="exportHistoryButton" type="button" class="history-action" onclick="exportHistoryCSV()" disabled>Export CSV</button>
+                    </div>
+                    <div id="historyStatus" class="text-small text-muted history-status" role="status">Loading saved events...</div>
+                    <div id="historyList" class="history-list" aria-live="polite">
+                        <p class="text-muted">Loading history from Firebase...</p>
+                    </div>
+                    <p class="text-small text-muted history-help">You can add the selected target SOC and phone-displayed SOC after a stop. These are test notes only: they do not change the charger settings.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Smart Charger v1.0 | Firebase Real-Time Database</p>
+    </footer>
+
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBynjFD_zDPGjHfLXThm15IZtMqRBu28GM",
+            authDomain: "thesis-a931e.firebaseapp.com",
+            databaseURL: "https://thesis-a931e-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "thesis-a931e",
+            storageBucket: "thesis-a931e.appspot.com",
+            messagingSenderId: "1046087149903",
+            appId: "1:1046087149903:web:abcd1234efgh5678ijkl"
+        };
+
+        // Initialize Firebase
+        let db;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+        } catch (error) {
+            console.error("Firebase initialization error:", error);
+            document.getElementById('warningBox').style.display = 'block';
+            document.getElementById('warningBox').innerHTML = '<strong>❌ Error:</strong> Could not connect to Firebase. Check credentials in the code.';
+        }
+
+        // Global state
+        let chargeHistory = [];
+        let powerHistory = [];
+        let socHistory = [];
+        let sessionElapsedSeconds = 0;
+        let sessionElapsedUpdatedAt = 0;
+        let fallbackChargeStartedAt = null;
+        let isCharging = false;
+        let previousChargingState = null;
+        let charts = {};
+        // Separate path: ESP32 periodically replaces /charger with setJSON().
+        // Persisting events underneath /charger would erase them.
+        const HISTORY_PATH = '/charging_history';
+        let savedStopHistory = [];
+        let historyRef = null;
+        let historyListenerReady = false;
+        let lastObservedStopSignature = null;
+
+        // Chart instances
+        let cycleChart, powerChart, socChart, sessionsChart;
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            initializeCharts();
+            initializeDefaults();
+            subscribeToFirebase();
+            subscribeToSavedHistory();
+            updateConnection(false); // Start as disconnected
+            setInterval(updateChargingTime, 1000);
+        });
+
+        function subscribeToFirebase() {
+            if (!db) {
+                document.getElementById('warningBox').style.display = 'block';
+                return;
+            }
+
+            const chargerRef = db.ref('/charger');
+            let firstLoad = true;
+
+            chargerRef.on('value', (snapshot) => {
+                updateConnection(true);
+
+                if (!snapshot.exists()) {
+                    document.getElementById('warningBox').style.display = 'block';
+                    document.getElementById('warningBox').innerHTML =
+                        '<strong>Connected to Firebase.</strong> Waiting for data at /charger.';
+                    return;
+                }
+
+                const data = snapshot.val();
+                
+                if (firstLoad) {
+                    document.getElementById('warningBox').style.display = 'none';
+                    firstLoad = false;
+                }
+
+                if (!Number.isFinite(Number(data.charge_elapsed_seconds))) {
+                    document.getElementById('warningBox').style.display = 'block';
+                    document.getElementById('warningBox').innerHTML =
+                        '<strong>Older charger firmware detected.</strong> Upload the updated sketch for device-based charging time.';
+                } else {
+                    document.getElementById('warningBox').style.display = 'none';
+                }
+
+                updateRealtimeData(data);
+                recordHistory(data);
+                updateCharts(data);
+            });
+
+            chargerRef.on('error', (error) => {
+                console.error('Firebase error:', error);
+                updateConnection(false);
+                document.getElementById('warningBox').style.display = 'block';
+                document.getElementById('warningBox').innerHTML =
+                    '<strong>Firebase error:</strong> ' + error.message;
+            });
+        }
+
+        function updateConnection(connected) {
+            const status = document.getElementById('connectionStatus');
+            const text = document.getElementById('connectionText');
+            
+            if (connected) {
+                status.classList.remove('disconnected');
+                status.classList.add('connected');
+                text.textContent = 'Connected';
+                document.querySelector('.status-dot').classList.add('connected');
+            } else {
+                status.classList.add('disconnected');
+                status.classList.remove('connected');
+                text.textContent = 'Disconnected';
+                document.querySelector('.status-dot').classList.remove('connected');
+            }
+        }
+
+        function initializeDefaults() {
+            // Set all values to "--" by default
+            document.getElementById('voltageValue').textContent = '--';
+            document.getElementById('currentValue').textContent = '--';
+            document.getElementById('socValue').textContent = '--';
+            document.getElementById('socProgress').style.width = '0%';
+            document.getElementById('baselineValue').textContent = '--';
+            document.getElementById('cutoffValue').textContent = '--';
+            document.getElementById('hysteresisValue').textContent = '--';
+            document.getElementById('rawCurrentValue').textContent = '--';
+            document.getElementById('medianCurrentValue').textContent = '--';
+            document.getElementById('relayStatus').textContent = '--';
+            document.getElementById('chargingTime').textContent = '--:--:--';
+            
+            // Set defaults for other fields
+            document.getElementById('socMethod').textContent = '--';
+            document.getElementById('trustValue').textContent = '--';
+            document.getElementById('statusValue').textContent = 'Waiting for data...';
+            document.getElementById('voltageStatus').textContent = 'No data yet';
+            
+            // Initialize state badge to IDLE
+            const stateElement = document.getElementById('stateValue');
+            stateElement.textContent = 'IDLE';
+            stateElement.className = 'status-badge status-idle';
+        }
+
+        function updateRealtimeData(data) {
+            // Voltage
+            const voltage = data.voltage_v || 0;
+            document.getElementById('voltageValue').textContent = voltage.toFixed(2);
+            document.getElementById('voltageStatus').textContent = 
+                voltage < 4.65 ? '⚠️ Voltage sag detected!' : 'Stable';
+
+            // Current
+            const current = data.current_a || 0;
+            const rawCurrent = data.raw_current_a || 0;
+            const medianCurrent = data.median_current_a || 0;
+            
+            document.getElementById('currentValue').textContent = current.toFixed(2);
+            document.getElementById('rawCurrentValue').textContent = rawCurrent.toFixed(3);
+            document.getElementById('medianCurrentValue').textContent = medianCurrent.toFixed(3);
+
+            // SOC
+            const soc = Number.isFinite(Number(data.soc_estimate))
+                ? Number(data.soc_estimate) : -1;
+            if (soc >= 0) {
+                document.getElementById('socValue').textContent = soc;
+                document.getElementById('socProgress').style.width = soc + '%';
+                document.getElementById('socProgress').textContent = soc + '%';
+            } else {
+                document.getElementById('socValue').textContent = '—';
+                document.getElementById('socProgress').style.width = '0%';
+                document.getElementById('socProgress').textContent = '';
+            }
+
+            document.getElementById('socMethod').textContent = 
+                data.soc_method ? data.soc_method.replace(/_/g, ' ') : 'Unknown';
+
+            // State
+            const state = data.state || (data.is_charging ? 'CHARGING' : 'IDLE');
+            const stateElement = document.getElementById('stateValue');
+            stateElement.textContent = state;
+            stateElement.className = 'status-badge status-' + state.toLowerCase();
+
+            // Status message
+            document.getElementById('statusValue').textContent = data.status || 'Unknown';
+
+            // Baseline
+            const baseline = data.baseline_current_a || 0;
+            document.getElementById('baselineValue').textContent = baseline.toFixed(3);
+            document.getElementById('trustValue').textContent = data.trust_state || 'Unknown';
+
+            // Cutoff
+            const cutoff = data.cutoff_current_a || 0;
+            const hysteresis = data.cutoff_hysteresis_a || 0;
+            document.getElementById('cutoffValue').textContent = cutoff.toFixed(3);
+            document.getElementById('hysteresisValue').textContent = hysteresis.toFixed(3);
+
+            // Relay
+            document.getElementById('relayStatus').textContent = data.relay_on ? 'ON' : 'OFF';
+
+            // Below cutoff timer
+            const belowSeconds = data.below_cutoff_seconds || 0;
+            const requiredSeconds = data.below_cutoff_required_seconds || 300;
+            document.getElementById('belowCutoffTime').textContent = 
+                belowSeconds + ' / ' + requiredSeconds + ' sec';
+
+            const chargingNow = state === 'CALIBRATING' || state === 'CHARGING';
+            const now = Date.now();
+            const deviceElapsedSeconds = Number(data.charge_elapsed_seconds);
+
+            if (previousChargingState === null) {
+                // On initial load we only establish state; do not fabricate a start
+                // or stop event for an already-running/completed session.
+                if (chargingNow) fallbackChargeStartedAt = now;
+            } else if (chargingNow && previousChargingState === false) {
+                resetSessionAnalytics();
+                fallbackChargeStartedAt = now;
+                lastObservedStopSignature = null;
+            } else if (!chargingNow && previousChargingState === true) {
+                if (!Number.isFinite(deviceElapsedSeconds)) {
+                    sessionElapsedSeconds = fallbackChargeStartedAt
+                        ? Math.floor((now - fallbackChargeStartedAt) / 1000)
+                        : sessionElapsedSeconds;
+                }
+                saveStopEvent(data);
+                resetSessionAnalytics();
+                fallbackChargeStartedAt = null;
+            }
+
+            isCharging = chargingNow;
+            if (Number.isFinite(deviceElapsedSeconds)) {
+                sessionElapsedSeconds = Math.max(0, deviceElapsedSeconds);
+            } else if (chargingNow && fallbackChargeStartedAt) {
+                sessionElapsedSeconds = Math.floor((now - fallbackChargeStartedAt) / 1000);
+            } else if (!chargingNow && previousChargingState !== true) {
+                sessionElapsedSeconds = 0;
+            }
+            sessionElapsedUpdatedAt = now;
+            previousChargingState = chargingNow;
+        }
+
+        function updateChargingTime() {
+            if (sessionElapsedUpdatedAt) {
+                const elapsed = sessionElapsedSeconds +
+                    (isCharging ? Math.floor((Date.now() - sessionElapsedUpdatedAt) / 1000) : 0);
+                const hours = Math.floor(elapsed / 3600);
+                const minutes = Math.floor((elapsed % 3600) / 60);
+                const seconds = elapsed % 60;
+                document.getElementById('chargingTime').textContent = 
+                    `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            } else {
+                document.getElementById('chargingTime').textContent = '00:00:00';
+            }
+        }
+
+        function recordHistory(data) {
+            if (data.state !== 'CHARGING' && data.state !== 'CALIBRATING') return;
+
+            const timestamp = new Date();
+            
+            powerHistory.push({
+                time: timestamp,
+                voltage: data.voltage_v,
+                current: data.current_a
+            });
+
+            if (data.soc_estimate >= 0) {
+                socHistory.push({
+                    time: timestamp,
+                    soc: data.soc_estimate
+                });
+            }
+
+            if (data.state === 'CHARGING' || data.state === 'CALIBRATING') {
+                chargeHistory.push({
+                    time: timestamp,
+                    state: 'charging',
+                    current: data.current_a,
+                    soc: data.soc_estimate
+                });
+            } else if (data.state === 'DONE') {
+                chargeHistory.push({
+                    time: timestamp,
+                    state: 'done',
+                    current: data.current_a,
+                    soc: data.soc_estimate
+                });
+            }
+
+            // Keep only last 200 records to avoid performance issues
+            if (powerHistory.length > 200) powerHistory.shift();
+            if (socHistory.length > 200) socHistory.shift();
+            if (chargeHistory.length > 200) chargeHistory.shift();
+        }
+
+        function updateCharts(data) {
+            // Update power chart
+            if (cycleChart && (data.state === 'CHARGING' || data.state === 'CALIBRATING')) {
+                cycleChart.data.datasets[0].data.push(
+                    data.current_a ? 1 : 0
+                );
+                cycleChart.data.labels.push(
+                    new Date().toLocaleTimeString('en-US', { hour12: false })
+                );
+
+                // Keep only last 50 points
+                if (cycleChart.data.labels.length > 50) {
+                    cycleChart.data.labels.shift();
+                    cycleChart.data.datasets[0].data.shift();
+                }
+
+                cycleChart.update('none');
+            }
+
+            // Update voltage/current chart
+            if (powerChart && powerHistory.length > 0) {
+                powerChart.data.labels = powerHistory.map(h => h.time.toLocaleTimeString());
+                powerChart.data.datasets[0].data = powerHistory.map(h => h.voltage);
+                powerChart.data.datasets[1].data = powerHistory.map(h => h.current);
+                powerChart.update('none');
+            }
+
+            // Update SOC chart
+            if (socChart && socHistory.length > 0) {
+                socChart.data.labels = socHistory.map(h => h.time.toLocaleTimeString());
+                socChart.data.datasets[0].data = socHistory.map(h => h.soc);
+                socChart.update('none');
+            }
+
+        }
+
+        function resetSessionAnalytics() {
+            chargeHistory = [];
+            powerHistory = [];
+            socHistory = [];
+
+            [cycleChart, powerChart, socChart].forEach(chart => {
+                if (!chart) return;
+                chart.data.labels = [];
+                chart.data.datasets.forEach(dataset => {
+                    dataset.data = [];
+                });
+                chart.update('none');
+            });
+
+            if (sessionsChart) {
+                sessionsChart.data.datasets[0].data = [0];
+                sessionsChart.update('none');
+            }
+        }
+
+        // ===== Persistent Firebase history (separate from live charts) =====
+        function subscribeToSavedHistory() {
+            if (!db) {
+                setHistoryStatus('Firebase is unavailable. Saved history cannot be loaded.', true);
+                return;
+            }
+            historyRef = db.ref(HISTORY_PATH);
+            // RTDB push keys are chronological. Display the latest 200 events.
+            historyRef.limitToLast(200).on('value', snapshot => {
+                const records = snapshot.val() || {};
+                savedStopHistory = Object.entries(records)
+                    .filter(([, record]) => record && typeof record === 'object' && record.type === 'charging_stopped')
+                    .map(([key, record]) => ({ key, ...record }))
+                    .sort((a, b) => (Number(b.recorded_at_ms) || 0) - (Number(a.recorded_at_ms) || 0));
+                historyListenerReady = true;
+                setHistoryStatus(`${savedStopHistory.length} saved stop event(s) shown (latest 200).`);
+                document.getElementById('exportHistoryButton').disabled = savedStopHistory.length === 0;
+                renderSavedHistory();
+            }, error => {
+                setHistoryStatus('Could not read /charging_history: ' + error.message, true);
+            });
+        }
+
+        function setHistoryStatus(message, isError = false) {
+            const el = document.getElementById('historyStatus');
+            el.textContent = message;
+            el.classList.toggle('history-error', isError);
+        }
+
+        function saveStopEvent(data) {
+            if (!historyRef) {
+                setHistoryStatus('Stop observed, but Firebase history is not initialized.', true);
+                return;
+            }
+            const reason = String(data.status || 'Unknown stopping condition');
+            const state = String(data.state || 'IDLE');
+            const elapsed = safeNumber(data.charge_elapsed_seconds);
+            const estimate = safeNumber(data.soc_estimate);
+            const uptime = safeNumber(data.uptime_ms);
+            const signature = [reason, state, elapsed, estimate, uptime].join('|');
+            if (signature === lastObservedStopSignature) return;
+            lastObservedStopSignature = signature;
+
+            const event = {
+                type: 'charging_stopped',
+                stop_reason: reason,
+                charger_state: state,
+                final_estimated_soc: estimate,
+                phone_soc_at_cutoff: null, // Entered manually from the smartphone display
+                selected_target_soc: null, // Not provided by this firmware telemetry version
+                relay_on: Boolean(data.relay_on),
+                duration_seconds: elapsed,
+                current_a: safeNumber(data.current_a),
+                voltage_v: safeNumber(data.voltage_v),
+                device_uptime_ms: uptime,
+                recorded_at_ms: firebase.database.ServerValue.TIMESTAMP,
+                source: 'dashboard_transition'
+            };
+            // push().set() saves this in RTDB; it survives browser refresh/reopen.
+            // For guaranteed logging when the browser is closed, the ESP32 must
+            // independently write a stop event (not implemented in this web-only patch).
+            historyRef.push().set(event).catch(error => {
+                lastObservedStopSignature = null; // Permit retry after a fresh transition.
+                setHistoryStatus('Failed to save stop event: ' + error.message, true);
+            });
+        }
+
+        function safeNumber(value) {
+            if (value === null || value === undefined || value === '') return null;
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        function formatSOC(value) {
+            return value === null || value === undefined ? 'Not recorded' : value + '%';
+        }
+
+        function formatDuration(seconds) {
+            const n = safeNumber(seconds);
+            if (n === null) return 'Unknown';
+            const s = Math.max(0, Math.floor(n));
+            return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60]
+                .map(x => String(x).padStart(2, '0')).join(':');
+        }
+
+        function textElement(tag, content, className) {
+            const el = document.createElement(tag);
+            if (className) el.className = className;
+            el.textContent = content;
+            return el;
+        }
+
+        function detail(parent, label, value) {
+            const el = textElement('span', `${label}: ${value}`, 'history-detail');
+            parent.appendChild(el);
+        }
+
+        function makeNoteField(label, initialValue, placeholder) {
+            const wrap = document.createElement('label');
+            wrap.className = 'history-note-field';
+            wrap.appendChild(textElement('span', label));
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.max = '100';
+            input.step = '1';
+            input.placeholder = placeholder;
+            input.value = initialValue === null || initialValue === undefined ? '' : String(initialValue);
+            wrap.appendChild(input);
+            return { wrap, input };
+        }
+
+        function renderSavedHistory() {
+            const container = document.getElementById('historyList');
+            container.replaceChildren(); // Do not inject Firebase text as HTML.
+            if (!savedStopHistory.length) {
+                container.appendChild(textElement('p',
+                    'No saved charging stops yet. Keep this dashboard open during a charging session to log the next stop.',
+                    'text-muted'));
+                return;
+            }
+
+            savedStopHistory.forEach(record => {
+                const item = document.createElement('article');
+                item.className = 'event-item';
+                const time = Number(record.recorded_at_ms);
+                const formattedDate = Number.isFinite(time) && time > 0
+                    ? new Date(time).toLocaleString() : 'Timestamp pending';
+                item.appendChild(textElement('div', formattedDate, 'event-time'));
+                item.appendChild(textElement('div', '⏹ ' + (record.stop_reason || 'Unknown stop reason'), 'history-stop-reason'));
+
+                const details = document.createElement('div');
+                details.className = 'history-details';
+                detail(details, 'Device state', record.charger_state || 'Unknown');
+                detail(details, 'Relay', record.relay_on ? 'ON' : 'OFF');
+                detail(details, 'Estimated SOC', formatSOC(record.final_estimated_soc));
+                detail(details, 'Duration', formatDuration(record.duration_seconds));
+                detail(details, 'Selected target', formatSOC(record.selected_target_soc));
+                detail(details, 'Phone SOC', formatSOC(record.phone_soc_at_cutoff));
+                item.appendChild(details);
+
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'history-edit-button';
+                toggle.textContent = 'Edit test notes';
+                const form = document.createElement('div');
+                form.className = 'history-note-form hidden';
+                const target = makeNoteField('Selected target SOC (%)', record.selected_target_soc, 'e.g., 85');
+                const phone = makeNoteField('Phone SOC at cutoff (%)', record.phone_soc_at_cutoff, 'e.g., 86');
+                const save = document.createElement('button');
+                save.type = 'button';
+                save.textContent = 'Save test notes';
+                save.className = 'history-action';
+                const feedback = textElement('span', '', 'history-note-feedback');
+
+                toggle.addEventListener('click', () => {
+                    form.classList.toggle('hidden');
+                });
+                save.addEventListener('click', async () => {
+                    const parsePercent = el => {
+                        if (el.value.trim() === '') return null;
+                        const value = Number(el.value);
+                        if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error('SOC must be an integer from 0 to 100.');
+                        return value;
+                    };
+                    try {
+                        const targetValue = parsePercent(target.input);
+                        const phoneValue = parsePercent(phone.input);
+                        if (targetValue !== null && (targetValue < 80 || targetValue > 100 || targetValue % 5 !== 0)) {
+                            throw new Error('Selected target must be 80, 85, 90, 95 or 100%.');
+                        }
+                        save.disabled = true;
+                        feedback.textContent = 'Saving...';
+                        await historyRef.child(record.key).update({
+                            selected_target_soc: targetValue,
+                            phone_soc_at_cutoff: phoneValue
+                        });
+                        feedback.textContent = 'Saved to Firebase.';
+                    } catch (error) {
+                        feedback.textContent = error.message;
+                        save.disabled = false;
+                    }
+                });
+
+                form.append(target.wrap, phone.wrap, save, feedback);
+                item.append(toggle, form);
+                container.appendChild(item);
+            });
+        }
+
+        function exportHistoryCSV() {
+            if (!savedStopHistory.length) return;
+            const cols = [
+                ['Date and time', r => Number(r.recorded_at_ms) ? new Date(r.recorded_at_ms).toISOString() : ''],
+                ['Stop reason', r => r.stop_reason ?? ''],
+                ['Charger state', r => r.charger_state ?? ''],
+                ['Relay ON', r => r.relay_on === true ? 'YES' : 'NO'],
+                ['Smart Charger SOC (%)', r => r.final_estimated_soc ?? ''],
+                ['Selected target SOC (%)', r => r.selected_target_soc ?? ''],
+                ['Phone SOC at cutoff (%)', r => r.phone_soc_at_cutoff ?? ''],
+                ['Charging duration (s)', r => r.duration_seconds ?? ''],
+                ['Current (A)', r => r.current_a ?? ''],
+                ['Voltage (V)', r => r.voltage_v ?? '']
+            ];
+            const csvCell = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+            const rows = [cols.map(c => csvCell(c[0])).join(',')];
+            savedStopHistory.forEach(r => rows.push(cols.map(c => csvCell(c[1](r))).join(',')));
+            const csv = '\uFEFF' + rows.join('\r\n');
+            const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'smart_charger_stop_history.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function initializeCharts() {
+            const chartConfig = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            };
+
+            // Cycle Chart (Charging On/Off)
+            cycleChart = new Chart(document.getElementById('cycleChart'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Charging (1=ON, 0=OFF)',
+                        data: [],
+                        borderColor: '#2a5298',
+                        backgroundColor: 'rgba(42, 82, 152, 0.5)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    ...chartConfig,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 1,
+                            ticks: {
+                                stepSize: 1,
+                                callback: (value) => value === 1 ? 'ON' : 'OFF'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Power Chart (Voltage & Current)
+            powerChart = new Chart(document.getElementById('powerChart'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Voltage (V)',
+                            data: [],
+                            borderColor: '#ff9800',
+                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                            borderWidth: 2,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Current (A)',
+                            data: [],
+                            borderColor: '#2196f3',
+                            backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                            borderWidth: 2,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    ...chartConfig,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Voltage (V)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Current (A)' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+
+            // SOC Chart
+            socChart = new Chart(document.getElementById('socChart'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'SOC (%)',
+                        data: [],
+                        borderColor: '#4caf50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    ...chartConfig,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: { display: true, text: 'State of Charge (%)' }
+                        }
+                    }
+                }
+            });
+
+            // Sessions Chart
+            sessionsChart = new Chart(document.getElementById('sessionsChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Complete Sessions'],
+                    datasets: [{
+                        data: [0],
+                        backgroundColor: ['rgba(76, 175, 80, 0.7)'],
+                        borderColor: ['#4caf50'],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    ...chartConfig,
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Deactivate all buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+
+            // Activate button
+            event.target.classList.add('active');
+
+            // Trigger chart resize
+            setTimeout(() => {
+                if (cycleChart) cycleChart.resize();
+                if (powerChart) powerChart.resize();
+                if (socChart) socChart.resize();
+                if (sessionsChart) sessionsChart.resize();
+            }, 100);
+        }
+    </script>
+</body>
+</html>
